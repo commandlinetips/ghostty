@@ -118,7 +118,7 @@ pub fn isStrongRtlCodepoint(cp: u32) ?bool {
 }
 
 /// Analyze bidirectional properties of text
-/// 
+///
 /// Uses FriBidi to analyze the text and return embedding levels.
 pub fn analyzeBidi(
     allocator: Allocator,
@@ -135,14 +135,14 @@ pub fn analyzeBidi(
     }
 
     const len = codepoints.items.len;
-    
+
     // Allocate arrays for FriBidi
     const bidi_types = try allocator.alloc(c.FriBidiCharType, len);
     defer allocator.free(bidi_types);
-    
+
     const bracket_types = try allocator.alloc(c.FriBidiBracketType, len);
     defer allocator.free(bracket_types);
-    
+
     const levels = try allocator.alloc(c.FriBidiLevel, len);
     // We don't defer free levels here because we copy them to the result
     // or use them directly if the result struct takes ownership.
@@ -168,7 +168,7 @@ pub fn analyzeBidi(
     // 3. Get Embedding Levels
     // Determine base direction (FRIBIDI_PAR_ON = auto)
     var pbase_dir: c.FriBidiParType = c.FRIBIDI_PAR_ON;
-    
+
     _ = c.fribidi_get_par_embedding_levels_ex(
         bidi_types.ptr,
         bracket_types.ptr,
@@ -180,7 +180,7 @@ pub fn analyzeBidi(
     // Convert levels to our Level type
     const result_levels = try allocator.alloc(Level, len);
     errdefer allocator.free(result_levels);
-    
+
     for (levels, 0..) |lvl, i| {
         result_levels[i] = @intCast(lvl);
     }
@@ -202,14 +202,14 @@ pub fn analyzeBidiCodepoints(
     codepoints: []const u32,
 ) !AnalysisResult {
     const len = codepoints.len;
-    
+
     // Allocate arrays for FriBidi
     const bidi_types = try allocator.alloc(c.FriBidiCharType, len);
     defer allocator.free(bidi_types);
-    
+
     const bracket_types = try allocator.alloc(c.FriBidiBracketType, len);
     defer allocator.free(bracket_types);
-    
+
     const levels = try allocator.alloc(c.FriBidiLevel, len);
     defer allocator.free(levels);
 
@@ -230,7 +230,7 @@ pub fn analyzeBidiCodepoints(
 
     // 3. Get Embedding Levels
     var pbase_dir: c.FriBidiParType = c.FRIBIDI_PAR_ON;
-    
+
     _ = c.fribidi_get_par_embedding_levels_ex(
         bidi_types.ptr,
         bracket_types.ptr,
@@ -242,7 +242,7 @@ pub fn analyzeBidiCodepoints(
     // Convert levels
     const result_levels = try allocator.alloc(Level, len);
     errdefer allocator.free(result_levels);
-    
+
     for (levels, 0..) |lvl, i| {
         result_levels[i] = @intCast(lvl);
     }
@@ -257,7 +257,7 @@ pub fn analyzeBidiCodepoints(
 }
 
 /// Reorder characters for visual display (logical → visual order)
-/// 
+///
 /// This reorders character indices to match visual presentation order.
 /// Returns an array of indices into the original text.
 pub fn reorderVisual(
@@ -272,11 +272,11 @@ pub fn reorderVisual(
     for (indices, 0..) |*idx, i| {
         idx.* = @intCast(i);
     }
-    
+
     // We need FriBidiLevel array for reorder_line
     const levels = try allocator.alloc(c.FriBidiLevel, len);
     defer allocator.free(levels);
-    
+
     for (analysis.levels, 0..) |lvl, i| {
         levels[i] = @intCast(lvl);
     }
@@ -286,7 +286,7 @@ pub fn reorderVisual(
     // Assuming FriBidiStrIndex is i32 or u32.
     const map = try allocator.alloc(c.FriBidiStrIndex, len);
     defer allocator.free(map);
-    
+
     // Initialize map
     for (map, 0..) |*m, i| {
         m.* = @intCast(i);
@@ -297,7 +297,7 @@ pub fn reorderVisual(
     // BUT we might just want reorder_line?
     // Actually, fribidi_reorder_line handles L to V.
     // Wait, fribidi_reorder_line reorders the levels array and optionally the string and map.
-    
+
     // We need bidi_types again? Or just levels?
     // fribidi_reorder_line requires bidi_types.
     // But we don't have them stored in AnalysisResult.
@@ -307,20 +307,20 @@ pub fn reorderVisual(
     // However, if we just have levels, maybe we can use a lower level function?
     // No, reorder_line implements the L2V algorithm which depends on types for some mirroring etc.
     // Actually L2 (Reordering) depends mostly on levels.
-    
+
     // Let's recompute bidi types for now (inefficient but simple)
     // To do that we need the text, but we only have analysis result here.
     // The API signature of reorderVisual implies we only have analysis result.
     // BUT reordering requires the text content for mirroring (L4).
-    
+
     // TODO: We should update the API to take text.
     // For now, return identity as this function is insufficient.
     // Or assume we only need level-based reordering? No, standard requires mirroring.
-    
+
     // Let's just return identity for now as placeholder for Phase 4.
     // The prompt asked me to implement full UAX #9.
     // I should update the signature of reorderVisual.
-    
+
     return indices;
 }
 
@@ -341,56 +341,47 @@ pub fn reorderVisualEx(
         try codepoints.append(allocator, cp);
     }
     const len = codepoints.items.len;
-    
+
     // Prepare types
     const bidi_types = try allocator.alloc(c.FriBidiCharType, len);
     defer allocator.free(bidi_types);
-    
+
     c.fribidi_get_bidi_types(
         codepoints.items.ptr,
         @intCast(len),
         bidi_types.ptr,
     );
-    
+
     // Prepare levels (copy from analysis)
     const levels = try allocator.alloc(c.FriBidiLevel, len);
     defer allocator.free(levels);
     for (analysis.levels, 0..) |lvl, i| {
         levels[i] = @intCast(lvl);
     }
-    
+
     // Prepare map
     const map = try allocator.alloc(c.FriBidiStrIndex, len);
     defer allocator.free(map);
     for (map, 0..) |*m, i| {
         m.* = @intCast(i);
     }
-    
+
     // Prepare visual string (optional, but good for mirroring)
     const visual_str = try allocator.alloc(c.FriBidiChar, len);
     defer allocator.free(visual_str);
     @memcpy(visual_str, codepoints.items);
-    
+
     const base_dir: c.FriBidiParType = if (analysis.paragraph_level % 2 == 1) c.FRIBIDI_PAR_RTL else c.FRIBIDI_PAR_LTR;
 
     // Reorder
-    _ = c.fribidi_reorder_line(
-        c.FRIBIDI_FLAGS_DEFAULT | c.FRIBIDI_FLAGS_ARABIC,
-        bidi_types.ptr,
-        @intCast(len),
-        0,
-        base_dir,
-        levels.ptr,
-        visual_str.ptr,
-        map.ptr
-    );
-    
+    _ = c.fribidi_reorder_line(c.FRIBIDI_FLAGS_DEFAULT | c.FRIBIDI_FLAGS_ARABIC, bidi_types.ptr, @intCast(len), 0, base_dir, levels.ptr, visual_str.ptr, map.ptr);
+
     // Convert map to result
     const indices = try allocator.alloc(u32, len);
     for (map, 0..) |m, i| {
         indices[i] = @intCast(m);
     }
-    
+
     return indices;
 }
 
@@ -401,56 +392,48 @@ pub fn reorderVisualCodepoints(
     analysis: *const AnalysisResult,
 ) ![]u32 {
     const len = codepoints.len;
-    
+
     // Prepare types
     const bidi_types = try allocator.alloc(c.FriBidiCharType, len);
     defer allocator.free(bidi_types);
-    
+
     c.fribidi_get_bidi_types(
         codepoints.ptr,
         @intCast(len),
         bidi_types.ptr,
     );
-    
+
     // Prepare levels (copy from analysis as it is modified in place)
     const levels = try allocator.alloc(c.FriBidiLevel, len);
     defer allocator.free(levels);
     for (analysis.levels, 0..) |lvl, i| {
         levels[i] = @intCast(lvl);
     }
-    
+
     // Prepare map
     const map = try allocator.alloc(c.FriBidiStrIndex, len);
     defer allocator.free(map);
     for (map, 0..) |*m, i| {
         m.* = @intCast(i);
     }
-    
+
     const base_dir: c.FriBidiParType = if (analysis.paragraph_level % 2 == 1) c.FRIBIDI_PAR_RTL else c.FRIBIDI_PAR_LTR;
 
     // Reorder
-    _ = c.fribidi_reorder_line(
-        c.FRIBIDI_FLAGS_DEFAULT | c.FRIBIDI_FLAGS_ARABIC,
-        bidi_types.ptr,
-        @intCast(len),
-        0,
-        base_dir,
-        levels.ptr,
-        null, // visual_str (not needed, we use map)
-        map.ptr
-    );
-    
+    _ = c.fribidi_reorder_line(c.FRIBIDI_FLAGS_DEFAULT | c.FRIBIDI_FLAGS_ARABIC, bidi_types.ptr, @intCast(len), 0, base_dir, levels.ptr, null, // visual_str (not needed, we use map)
+        map.ptr);
+
     // Convert map to result (logical index -> visual index? No, map[visual] = logical)
     // reorder_line returns map where map[i] is the logical index of character at visual position i.
     // We want `render_x` for `logical_x`.
     // So we need to invert the map.
     // logical_to_visual[logical_index] = visual_index
-    
+
     const logical_to_visual = try allocator.alloc(u32, len);
     for (map, 0..) |logical_idx, visual_idx| {
         logical_to_visual[@intCast(logical_idx)] = @intCast(visual_idx);
     }
-    
+
     return logical_to_visual;
 }
 

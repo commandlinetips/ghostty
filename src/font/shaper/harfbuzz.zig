@@ -232,11 +232,7 @@ pub const Shaper = struct {
                         if (BiDi.isRtlScript(script)) {
                             self.shaper.hb_buf.setDirection(.rtl);
                         }
-                        log.debug("Setting HarfBuzz script={s} direction={s} for cp=0x{x}", .{
-                            @tagName(hb_script),
-                            if (BiDi.isRtlScript(script)) "rtl" else "ltr",
-                            cp
-                        });
+                        log.debug("Setting HarfBuzz script={s} direction={s} for cp=0x{x}", .{ @tagName(hb_script), if (BiDi.isRtlScript(script)) "rtl" else "ltr", cp });
                     }
                 }
             }
