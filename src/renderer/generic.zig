@@ -11,6 +11,7 @@ const terminal = @import("../terminal/main.zig");
 const renderer = @import("../renderer.zig");
 const math = @import("../math.zig");
 const Surface = @import("../Surface.zig");
+const BiDi = @import("../text/BiDi.zig");
 const link = @import("link.zig");
 const cellpkg = @import("cell.zig");
 const noMinContrast = cellpkg.noMinContrast;
@@ -2522,6 +2523,43 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                 var shaper_cells: ?[]const font.shape.Cell = null;
                 var shaper_cells_i: usize = 0;
 
+                // Pre-calculate BiDi visual mapping for this row
+                var logical_to_visual: ?[]u32 = null;
+                defer if (logical_to_visual) |ltv| self.alloc.free(ltv);
+                if (state.cols > 0) bidi: {
+                    // Optimization: Check if row has complex script first
+                    var has_complex = false;
+                    for (cells_raw[0..cells_len]) |c| {
+                        if (c.content_tag == .codepoint) {
+                            const script = BiDi.detectScript(c.content.codepoint);
+                            if (BiDi.isComplexScript(script)) {
+                                has_complex = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!has_complex) break :bidi;
+
+                    // Found complex text, perform full BiDi analysis
+                    var row_codepoints = try std.ArrayList(u32).initCapacity(self.alloc, cells_len);
+                    defer row_codepoints.deinit(self.alloc);
+
+                    for (cells_raw[0..cells_len]) |c| {
+                        row_codepoints.appendAssumeCapacity(if (c.content_tag == .codepoint) c.content.codepoint else 0x20);
+                    }
+
+                    var analysis = BiDi.analyzeBidiCodepoints(self.alloc, row_codepoints.items) catch |err| {
+                        log.warn("bidi analysis failed err={}", .{err});
+                        break :bidi;
+                    };
+                    defer analysis.deinit();
+
+                    logical_to_visual = BiDi.reorderVisualCodepoints(self.alloc, row_codepoints.items, &analysis) catch |err| {
+                        log.warn("bidi reorder failed err={}", .{err});
+                        break :bidi;
+                    };
+                }
+
                 for (
                     0..,
                     cells_raw[0..cells_len],
@@ -2856,6 +2894,14 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                         // This can occur for runs of empty cells, and is fine.
                         if (shaped_cells.len == 0) break :glyphs;
 
+                        // Detect RTL from cell cluster pattern:
+                        // If cells have descending cluster indices, it's RTL
+                        // NOTE: This is a fallback if we didn't get a full BiDi map
+                        var is_rtl = false;
+                        if (shaped_cells.len > 1) {
+                            is_rtl = shaped_cells[0].x > shaped_cells[shaped_cells.len - 1].x;
+                        }
+
                         // If we encounter a shaper cell to the left of the current
                         // cell then we have some problems. This logic relies on x
                         // position monotonically increasing.
@@ -2869,8 +2915,9 @@ pub fn Renderer(comptime GraphicsAPI: type) type {
                             run.offset + shaped_cells[shaper_cells_i].x == x) : ({
                             shaper_cells_i += 1;
                         }) {
+                            const render_x = if (logical_to_visual) |map| map[x] else (if (is_rtl) state.cols - 1 - x else x);
                             self.addGlyph(
-                                @intCast(x),
+                                @intCast(render_x),
                                 @intCast(y),
                                 state.cols,
                                 cells_raw,

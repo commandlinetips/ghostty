@@ -4,6 +4,7 @@ const Allocator = std.mem.Allocator;
 const font = @import("../main.zig");
 const shape = @import("../shape.zig");
 const terminal = @import("../../terminal/main.zig");
+const BiDi = @import("../../text/BiDi.zig");
 const autoHash = std.hash.autoHash;
 const Hasher = std.hash.Wyhash;
 
@@ -144,6 +145,31 @@ pub const RunIterator = struct {
                 const c1 = comparableStyle(style);
                 const c2 = comparableStyle(if (cell.hasStyling()) styles[j] else .{});
                 if (!c1.eql(c2)) break;
+            }
+
+            // Split run when script changes. This ensures that different scripts
+            // (Arabic, Hebrew, Latin, etc.) are shaped separately with the correct
+            // HarfBuzz script and direction settings. Without this, mixed text like
+            // "Hello مرحبا" would be one run with Latin script, causing Arabic letters
+            // to render without contextual joining.
+            if (j > self.i) {
+                const prev_cell = cells[j - 1];
+                if (prev_cell.content_tag == .codepoint and cell.content_tag == .codepoint) {
+                    const prev_cp = prev_cell.codepoint();
+                    const curr_cp = cell.codepoint();
+
+                    const prev_script = BiDi.detectScript(prev_cp);
+                    const curr_script = BiDi.detectScript(curr_cp);
+
+                    // Break if we're switching between complex scripts, or between
+                    // a complex script and any other script. This ensures each
+                    // complex script gets its own run for proper shaping.
+                    if (prev_script != curr_script) {
+                        if (BiDi.isComplexScript(prev_script) or BiDi.isComplexScript(curr_script)) {
+                            break;
+                        }
+                    }
+                }
             }
 
             // Text runs break when font styles change so we need to get

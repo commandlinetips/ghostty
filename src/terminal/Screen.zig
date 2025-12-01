@@ -3112,6 +3112,36 @@ fn testWriteSemanticString(self: *Screen, text: []const u8, semantic_prompt: Row
     }
 }
 
+/// Check if a row contains RTL text.
+/// This checks the first strong directional character in the row.
+/// Skips neutral and weak characters (spaces, punctuation, etc.) to find
+/// the first character with strong directionality (L or R in Unicode BiDi terms).
+pub fn isRowRTL(self: *const Screen, pin: Pin) bool {
+    _ = self;
+    const BiDi = @import("../text/BiDi.zig");
+    const rac = pin.rowAndCell();
+    const pg = pin.node.data;
+    const row = rac.row.*;
+    const base: [*]u8 = @ptrCast(pg.memory.ptr);
+    const cells = row.cells.ptr(base)[0..pg.size.cols];
+
+    if (cells.len == 0) return false;
+
+    // Find the first strong directional character
+    for (cells) |cell| {
+        if (cell.hasText()) {
+            const cp = cell.codepoint();
+
+            if (BiDi.isStrongRtlCodepoint(cp)) |is_rtl| {
+                return is_rtl; // Found strong character
+            }
+            // Skip neutral/weak characters
+        }
+    }
+
+    return false; // No strong character found, default LTR
+}
+
 test "Screen read and write" {
     const testing = std.testing;
     const alloc = testing.allocator;
