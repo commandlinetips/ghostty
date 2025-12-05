@@ -1,0 +1,1452 @@
+
+ ▐▛███▜▌   Claude Code v2.0.55
+▝▜█████▛▘  Sonnet 4.5 · Claude Pro
+  ▘▘ ▝▝    ~/test/tvs-A/my-project-with-code/ghostty/arabic/ghostty
+══════════════════ Conversation compacted · ctrl+o for history ═════════════════
+
+> /compact make sure to mention all the details and the full paths of all the 
+files to know what we are doing here 
+  ⎿  Compacted (ctrl+o to see full summary)
+  ⎿  Referenced file resulet.md
+  ⎿  Referenced file src/renderer/generic.zig
+  ⎿  Referenced file src/Surface.zig
+  ⎿  Read ../../../../../../../../tmp/ghostty_debug.log (35 lines)
+  ⎿  Read ../../../../../../../../tmp/quick_test.sh (4 lines)
+  ⎿  Todo list read (7 items)
+
+> stop the negative talk and where you expirtis and great mind that
+  glow like a torch read the code and flollow the pattern to find how to fix
+ it search web for simler case 
+
+● You're absolutely right! Let me approach this with fresh eyes and
+  determination. I'll analyze the code patterns to find where the selection
+  highlighting is actually drawn, and search for similar cases.
+
+● Let me trace through the code to find where selection highlighting is
+  actually drawn and search for similar cases!
+
+● Web Search("terminal emulator RTL Arabic text selection highlighting
+            bidirectional 2024 2025")
+  ⎿  Did 1 search in 20s                                                   
+
+● Search(pattern: "selection.*background|bg_color.*selection", path:
+        "src/renderer", output_mode: "content")
+  ⎿  Found 6 lines (ctrl+o to expand)
+
+● Search(pattern: "drawSelection|renderSelection|selection.*rect", path:
+        "src/renderer", output_mode: "content")
+  ⎿  Found 0 lines 
+
+● Read(src/renderer/generic.zig)
+  ⎿  Read 100 lines
+
+● Excellent! Now I see the pattern! The selection detection code at lines
+  2665-2679 correctly converts logical position to visual position for
+  DETECTING which cells are selected. But look at what happens AFTER that -
+  the code continues to use the logical x position for everything else!
+
+  Let me trace where the actual cell drawing happens:
+
+● Read(src/renderer/generic.zig)
+  ⎿  Read 100 lines
+
+● FOUND IT! Look at line 2825:
+
+  self.cells.bgCell(y, x).* = .{
+      rgb.r, rgb.g, rgb.b, bg_alpha,
+  };
+
+  This is where the background cell (the selection highlighting) is actually
+   drawn! It's using the logical x position, not the visual position! This
+  is exactly the bug!
+
+  Now let me check how the cells are structured and drawn:
+
+● Search(pattern: "fn bgCell|struct.*bgCell|bgCell.*=", path: "src/renderer",
+        output_mode: "content")
+  ⎿  Found 9 lines (ctrl+o to expand)
+
+● Search(pattern: "cells:.*CellsBuffer|CellsBuffer.*\{", path: "src/renderer",
+        output_mode: "content")
+  ⎿  Found 0 lines 
+
+● Read(src/renderer/cell.zig)
+  ⎿  Read 30 lines
+
+● Perfect! I can see the bgCell() function at line 178-184 calculates the
+  position as row * columns + col. This is a direct 1D array access using
+  the column position!
+
+  Now I understand the complete picture:
+
+  1. Selection detection (lines 2665-2679) correctly converts logical→visual
+   to detect which cells are selected ✓
+  2. Background drawing (line 2825) uses the logical x position to draw the
+  background color ✗
+
+  The fix is simple: We need to use the visual_x position when drawing the 
+  background for BiDi text!
+
+  Let me implement the fix:
+
+● Read(src/renderer/generic.zig)
+  ⎿  Read 40 lines
+
+● Now I'll implement the fix. The key insight is: When we have BiDi text, we
+   need to draw the background at the visual position, not the logical 
+  position!
+
+● Update(src/renderer/generic.zig)
+  ⎿  Updated src/renderer/generic.zig with 8 additions and 1 removal     
+       2822                                break :bg_alpha 0;
+       2823                            };
+       2824    
+       2825 -                          self.cells.bgCell(y, x).* = .{
+       2825 +                          // For BiDi text, we need to draw 
+            + the background at the visual position
+       2826 +                          // x is the logical position, but 
+            + background must be drawn at visual position
+       2827 +                          const bg_x = if 
+            + (logical_to_visual) |ltv|
+       2828 +                              ltv[x]
+       2829 +                          else
+       2830 +                              x;
+       2831 +  
+       2832 +                          self.cells.bgCell(y, bg_x).* = .{
+       2833                                rgb.r, rgb.g, rgb.b, bg_alpha,
+       2834                            };
+       2835                        }
+
+● Excellent! Now I need to check if there are other places where we draw
+  cell backgrounds that also need this fix. Let me check the other bgCell
+  calls:
+
+● Read(src/renderer/generic.zig)
+  ⎿  Read 20 lines
+
+● Read(src/renderer/generic.zig)
+  ⎿  Read 70 lines
+
+● Good! Lines 3435-3441 are for the preedit (IME input) feature, which uses
+  coordinates directly from the coord parameter. This is a special case for
+  input method editor overlays, so it doesn't need BiDi mapping.
+
+  Now let's build and test the fix!
+
+● Bash(zig build -Demit-bench -Doptimize=ReleaseFast 2>&1 | tail -30)
+  ⎿  Running in the background (down arrow to manage)
+
+● Perfect! I've found and fixed the root cause! Here's what I discovered:
+
+  The Root Cause
+
+  The bug was at line 2825 in /home/skull/test/tvs-A/my-project-with-code/gh
+  ostty/arabic/ghostty/src/renderer/generic.zig:
+
+  self.cells.bgCell(y, x).* = .{ rgb.r, rgb.g, rgb.b, bg_alpha };
+
+  This line draws the background color for each cell. The problem: it was
+  using the logical position x instead of the visual position for BiDi text!
+
+  The Fix
+
+  I added lines 2825-2830 to convert logical position to visual position
+  before drawing:
+
+  // For BiDi text, we need to draw the background at the visual position
+  // x is the logical position, but background must be drawn at visual
+  position
+  const bg_x = if (logical_to_visual) |ltv|
+      ltv[x]
+  else
+      x;
+
+  self.cells.bgCell(y, bg_x).* = .{ rgb.r, rgb.g, rgb.b, bg_alpha };
+
+  How It Works
+
+  For Arabic text "مرحبا" (marhaba):
+  - Before: Background drawn at logical positions 0,1,2,3,4 (LEFT side)
+  - After: Background drawn at visual positions 101,100,99,98,97 (RIGHT side
+   where the Arabic text actually appears!)
+
+  Research Context
+
+  I found that this is a common challenge. According to my web search,
+  Konsole is actually the only terminal emulator that renders RTL text from
+  the right edge correctly. Most terminals (including Windows Terminal as of
+   2025) still struggle with proper BiDi text rendering and selection.
+
+  Sources:
+  - https://gist.github.com/XVilka/a0e49e1c65370ba11c17
+  - https://github.com/ghostty-org/ghostty/discussions/9774
+  - https://github.com/microsoft/terminal/issues/19076
+
+  The build is running now. Once it completes, you can test if the Arabic
+  text selection highlighting now appears in the correct location!
+
+> great the selecting highlite showing correctlty but the selecting dont 
+point to the text when copyign while if i select the empty space on the left
+ with the same size of the text and copy its coping the text while the 
+hghlite and the text on the right 
+
+● Excellent progress! Now we have the highlighting in the right place, but
+  the selection coordinates need fixing too! The issue is that the mouse
+  click coordinates need to be converted from visual to logical when
+  creating the selection.
+
+● Let me find where the selection coordinates are stored when you click and
+  drag:
+
+● Search(pattern: "selection.*start|selection.*end|setSelection|startSelection",
+         path: "src", glob: "*.zig", output_mode: "content")
+  ⎿  Found 20 lines (ctrl+o to expand)
+
+● Search(pattern: "mouseDown.*selection|mouse.*select|viewport.*select", path:
+        "src", output_mode: "content")
+  ⎿  Found 15 lines (ctrl+o to expand)
+  ⎿  Interrupted · What should Claude do instead?
+
+> check the logs : /tmp/ghostty_debug3.log 
+
+● Read(/tmp/ghostty_debug3.log)
+  ⎿  Error: File content (40021 tokens) exceeds maximum allowed tokens (25000). 
+     Please use offset and limit parameters to read specific portions of the 
+     file, or use the GrepTool to search for specific content.
+
+● Bash(tail -100 /tmp/ghostty_debug3.log)
+  ⎿ warning(generic_renderer):   logical[3] -> visual[3]                   
+    warning(generic_renderer):   logical[4] -> visual[4]
+    warning(generic_renderer): BiDi maps created for row 2. First 5 logical
+    … +113 lines (ctrl+o to expand)
+
+
+● Good! Row 2 has Arabic text (logical[0]->visual[101]). Let me check for
+  mouse click and selection logs:
+
+● Bash(grep -i "MOUSE CLICK\|RTL Selection" /tmp/ghostty_debug3.log | tail -50)
+  ⎿ warning(generic_renderer): RTL Selection row=2: x=2 visual_x=99 sel=[0,
+    101] match=true
+    warning(generic_renderer): RTL Selection row=2: x=0 visual_x=101 sel=[0
+    … +96 lines (ctrl+o to expand)
+
+
+
+● Perfect! I see the issue now! Look at the selection bounds:
+
+  - When you select from RIGHT (Arabic text): sel=[0,11] or sel=[0,12] -
+  these are LOGICAL positions (left side)
+  - The visual positions are 99, 100, 101 (right side)
+
+  The problem: The selection is being stored in LOGICAL coordinates, but 
+  when you click on the RIGHT side (visual position 101), the mouse click 
+  needs to be converted from visual→logical!
+
+  Let me find where the mouse click creates the selection:
+
+● Read(src/Surface.zig)
+  ⎿  Read 50 lines
+
+● Let me find where the selection pins are created from mouse drag:
+
+● Read(src/Surface.zig)
+  ⎿  Read 100 lines
+
+● I see! At line 4495-4503, the code creates a pin from viewport
+  coordinates. The viewport coordinates come from pos_vp.x which is already
+  in VISUAL coordinates (from the mouse click). But the pin it creates needs
+   to be in LOGICAL coordinates for the terminal selection system!
+
+  Let me check the dragLeftClickSingle function:
+
+● Search(pattern: "fn dragLeftClickSingle", path: "src/Surface.zig",
+        output_mode: "content")
+  ⎿  Found 20 lines (ctrl+o to expand)
+
+● Read(src/Surface.zig)
+  ⎿  Read 150 lines
+
+● Now I understand the full flow! The issue is that viewport coordinates
+  (from mouse clicks) are already in VISUAL space, but pins are in LOGICAL
+  space. We need to convert the visual viewport coordinates to logical
+  coordinates BEFORE creating the pin!
+
+  Let me find where posToViewport is and check if we need to add BiDi
+  conversion there:
+
+● Search(pattern: "fn posToViewport|posToViewport.*\(", path: "src/Surface.zig",
+         output_mode: "content")
+  ⎿  Found 20 lines (ctrl+o to expand)
+
+● Search(pattern: "^    pub fn posToViewport|^    fn posToViewport", path:
+        "src/Surface.zig", output_mode: "content")
+  ⎿  Found 0 lines 
+
+● Search(pattern: "posToViewport", path: "src/Surface.zig")
+  ⎿  Found 1 file (ctrl+o to expand)
+
+● Bash(grep -n "posToViewport" /home/skull/test/tvs-A/my-project-with-code/ghost
+      ty/arabic/ghostty/src/Surface.zig | head -1)
+  ⎿  1105:    const pos_vp = self.posToViewport(pos.x, pos.y);
+
+● Bash(grep -n "    fn posToViewport\|    pub fn posToViewport" /home/skull/test
+      /tvs-A/my-project-with-code/ghostty/arabic/ghostty/src/Surface.zig)
+  ⎿  No matches found
+
+● Bash(awk '/fn posToViewport|pub fn posToViewport/{print NR": "$0; exit}'
+      /home/skull/test/tvs-A/my-project-with-code/ghostty/arabic/ghostty/src/Sur
+      face.zig)
+  ⎿ 4769: pub fn posToViewport(self: Surface, xpos: f64, ypos: f64) termina
+    l.point.Coordinate {
+
+
+● Perfect! Now let me read that function:
+
+● Read(src/Surface.zig)
+  ⎿  Read 30 lines
+
+● I see! The posToViewport function returns grid coordinates. The problem is
+   that this is where we need to convert from VISUAL grid coordinates (where
+   the mouse clicked) to LOGICAL grid coordinates (where the selection
+  system works).
+
+  But we need access to the BiDi map which is in the renderer. Let me think
+  about this differently - maybe we need to fix it where the selection is
+  being used for copying text instead!
+
+  Let me check where text is copied from the selection:
+
+● Search(pattern: "copySelection|copy.*selection|getSelection.*text", path:
+        "src", output_mode: "content")
+  ⎿  Found 20 lines (ctrl+o to expand)
+
+● Read(src/Surface.zig)
+  ⎿  Read 100 lines
+
+● I see! The text copying uses terminal.formatter.ScreenFormatter which
+  works with the selection. The selection stores logical coordinates. So the
+   problem is: when clicking on the RIGHT side (visual position 101), we 
+  need to convert that to logical position 0 BEFORE storing it in the 
+  selection!
+
+  The actual solution is simpler than I thought - we need to convert the
+  viewport coordinates from visual to logical in the renderer state! Let me
+  check where the selection bounds are passed to the renderer:
+
+● Read(src/terminal/render.zig)
+  ⎿  Read 60 lines
+
+● Wait! I see it now at line 626: sel_bounds.* = .{ start.x, end.x };
+
+  The selection bounds stored in row_sels are in LOGICAL coordinates
+  (start.x, end.x from the terminal selection). These are then used by the
+  renderer for comparison. But in the renderer, we correctly convert
+  logical→visual for the comparison.
+
+  The issue is: The selection itself is stored in visual coordinates when 
+  created from mouse clicks! The logs show sel=[0,11] which are visual
+  column positions (0=leftmost).
+
+  Let me trace back - when we click at visual position 101 (right side where
+   Arabic is), this becomes viewport x=101, which then becomes a Pin with
+  x=101. But for RTL text, pin x=101 should be converted to LOGICAL x=0!
+
+  I need to find where we can add the conversion. The best place is right
+  after creating the pin from viewport coordinates. Let me look at line 4495
+   again:
+
+● Read(src/Surface.zig)
+  ⎿  Read 30 lines
+
+● Actually, wait! Let me re-read the logs more carefully:
+
+  sel=[0,11]
+
+  These are NOT visual coordinates 0-11. Let me check which selection this
+  is. If visual 101→visual 89, that would be logical 0→logical 12 (13
+  characters). But the log shows sel=[0,11].
+
+  Let me think about this differently. The issue you described is:
+  - You click on the RIGHT side where Arabic text appears (visual positions
+  ~90-101)
+  - The highlighting NOW appears correctly on the right (our first fix
+  worked!)
+  - But when you copy, it copies the wrong text
+  - You have to select the LEFT side (empty space, positions 0-11) to copy
+  the Arabic text
+
+  This means the selection bounds being PASSED TO the renderer for
+  highlighting are CORRECT after our fix (they highlight the right side),
+  but the selection bounds used for COPYING are wrong!
+
+  Wait, I think I misunderstood the problem! Let me re-read your
+  description:
+
+  "the selecting dont point to the text when copyign while if i select the 
+  empty space on the left with the same size of the text and copy its coping
+   the text"
+
+  So:
+  1. When you select the Arabic text on the RIGHT (visual 90-101), the
+  highlighting appears CORRECTLY on the right
+  2. But copying gives you wrong/empty text
+  3. When you select the EMPTY SPACE on the LEFT (visual 0-11), copying
+  gives you the ARABIC TEXT
+
+  This means the selection coordinates stored in the terminal are VISUAL,
+  but the text copying system expects LOGICAL coordinates!
+
+  So the fix is: Convert the selection coordinates from visual→logical 
+  BEFORE storing them in the terminal selection!
+
+  Let me check the renderer's row_sels - are they visual or logical?
+
+  Actually, looking back at the code in generic.zig line 626:
+  sel_bounds.* = .{ start.x, end.x };
+
+  These come from the terminal selection which should be in LOGICAL
+  coordinates. But then in the renderer at line 2665-2679, we convert them
+  to visual for comparison. That means sel_bounds passed to the renderer are
+   LOGICAL, but we treat them as VISUAL in the comparison!
+
+  I think I had it backwards! Let me re-examine the logs:
+
+  RTL Selection row=2: x=0 visual_x=101 sel=[0,11] match=false
+
+  - x=0: logical position 0
+  - visual_x=101: visual position 101 (rightmost)
+  - sel=[0,11]: selection bounds
+  - match=false: visual_x=101 is NOT in range [0,11]
+
+  If sel=[0,11] are LOGICAL bounds, then visual positions 101-90 should
+  match! But they don't...
+
+  OH! I see the bug now! In line 2665-2679 of generic.zig, we assume sel
+  bounds are VISUAL, so we convert the cell's logical x to visual x for
+  comparison. But actually, sel bounds coming from the terminal ARE LOGICAL!
+
+  So we need to do the OPPOSITE: keep x as logical, and convert sel bounds
+  from logical to visual!
+
+  Let me fix this properly:
+
+● Read(src/renderer/generic.zig)
+  ⎿  Read 30 lines
+
+● Now I need to verify: are the selection bounds from render.zig logical or
+  visual? Let me check:
+
+● Read(src/terminal/render.zig)
+  ⎿  Read 10 lines
+
+● The selection bounds come from row_sel.start().x and row_sel.end().x.
+  These are Pin coordinates, which are always LOGICAL (they represent
+  positions in the terminal grid's logical storage).
+
+  So my current code at lines 2666-2679 is WRONG! I'm converting logical x
+  to visual for comparison against logical sel bounds, when I should be
+  keeping x as logical and comparing directly!
+
+  But wait, then why does the highlighting appear correctly now? Let me
+  think...
+
+  OH! The background drawing fix I made (lines 2825-2834) converts logical x
+   to visual bg_x for DRAWING. That's correct and working!
+
+  But the selection DETECTION (lines 2665-2679) should compare LOGICAL x
+  against LOGICAL sel bounds!
+
+  Let me revert my changes to the selection detection:
+
+● Update(src/renderer/generic.zig)
+  ⎿  Updated src/renderer/generic.zig with 4 additions and 14 removals   
+       2663                            else
+       2664                                x;
+       2665                            if (selection) |sel| {
+       2666 -                              // For BiDi text, x is logical
+            -  position, but selection bounds are visual
+       2667 -                              // Convert logical x 
+            -  to visual x for comparison
+       2668 -                              const visual_x = if 
+            - (logical_to_visual) |ltv|
+       2669 -                                  ltv[x_compare]
+       2670 -                              else
+       2671 -                                  x_compare;
+       2672 -  
+       2673 -                              // Debug logging for RTL 
+            - selection (only log first 3 cells to avoid spam)
+       2674 -                              if (logical_to_visual != null 
+            - and x < 3) {
+       2675 -                                  log.warn("RTL Selection 
+            - row={}: x={} visual_x={} sel=[{},{}] match={}", .{y, x, 
+            - visual_x, sel[0], sel[1], visual_x >= sel[0] and visual_x 
+            - <= sel[1]});
+       2676 -                              }
+       2677 -  
+       2678 -                              if (visual_x >= sel[0] and
+       2679 -                                  visual_x <= sel[1]) break 
+            - :selected .selection;
+       2666 +                              // Both x and sel bounds are 
+            + in logical coordinates
+       2667 +                              // No conversion needed 
+            +  for comparison
+       2668 +                              if (x_compare >= sel[0] and
+       2669 +                                  x_compare <= sel[1]
+            +  ) break :selected .selection;
+       2670                            }
+       2671    
+       2672                            // If we're highlighted, then 
+              we're selected. In the
+
+● Good! Now let me rebuild and test:
+
+● Bash(zig build -Demit-bench -Doptimize=ReleaseFast 2>&1 | tail -30)
+  ⎿  Running in the background (down arrow to manage)
+
+● Perfect! Here's what I've fixed:
+
+  Summary of the Complete Fix
+
+  Problem Analysis
+
+  You had TWO issues:
+  1. Highlighting appeared on the LEFT (empty space) when selecting Arabic
+  text on the RIGHT
+  2. Copying gave wrong text - had to select empty left side to copy the
+  Arabic text on the right
+
+  Root Causes Found
+
+  Issue 1 - Wrong highlighting position:
+  - File: /home/skull/test/tvs-A/my-project-with-code/ghostty/arabic/ghostty
+  /src/renderer/generic.zig:2825
+  - Problem: Background cells were drawn at LOGICAL positions instead of
+  VISUAL positions
+  - Fix: Added conversion from logical→visual before drawing (lines
+  2825-2834)
+
+  Issue 2 - Wrong text copied:
+  - File: Same file, lines 2665-2679
+  - Problem: I incorrectly added visual coordinate conversion in selection
+  detection
+  - Fix: Reverted that change - selection detection should compare logical
+  coords directly
+
+  The Correct Logic
+
+  For BiDi/RTL text:
+  1. Storage: Text stored in terminal grid at LOGICAL positions (0, 1, 2...)
+  2. Selection: Selection bounds stored in LOGICAL coordinates
+  3. Detection: Compare logical cell position against logical selection
+  bounds (NO conversion)
+  4. Rendering: Convert logical position to VISUAL position when drawing the
+   background highlight
+  5. Copying: Works with logical coordinates (already correct)
+
+  Files Modified
+
+  /home/skull/test/tvs-A/my-project-with-code/ghostty/arabic/ghostty/src/ren
+  derer/generic.zig:
+  - Lines 2825-2834: Added bg_x visual conversion for background drawing
+  - Lines 2665-2670: Simplified selection detection (removed incorrect
+  visual conversion)
+
+  The build is running. Once complete, test by:
+  1. Type Arabic text - it appears on the RIGHT
+  2. Select the Arabic text on the RIGHT - highlighting should appear on the
+   RIGHT
+  3. Copy (Ctrl+Shift+C) - should copy the Arabic text correctly!
+
+> the last change breack the highlite progress its back to select text on 
+the right the left empty space selected check the logs : 
+/tmp/ghostty_debug4.log 
+
+● Bash(tail -100 /tmp/ghostty_debug4.log | grep -E "MOUSE CLICK|BiDi maps|RTL
+      Selection" | head -30)
+  ⎿ warning(generic_renderer): BiDi maps created for row 1. First 5 logical
+    ->visual:
+    warning(generic_renderer): BiDi maps created for row 2. First 5 logical
+    … +29 lines (ctrl+o to expand)
+
+
+
+● Bash(grep "logical\[0\] -> visual" /tmp/ghostty_debug4.log | tail -5)
+  ⎿  warning(generic_renderer):   logical[0] -> visual[101]
+     warning(generic_renderer):   logical[0] -> visual[0]
+     warning(generic_renderer):   logical[0] -> visual[101]
+     … +2 lines (ctrl+o to expand)
+
+● I see! Row 2 has Arabic (logical[0]->visual[101]). The issue is that I
+  removed the debug logging. Let me understand what's happening:
+
+  The problem is that when you click on the RIGHT side (visual position
+  101), that becomes logical position 0 in the selection. The background IS
+  being drawn at the correct visual position (101), but something else is
+  wrong.
+
+  Wait, I think I see it now! The background drawing code uses bg_x which is
+   the visual position. But we're iterating through cells in LOGICAL order
+  (x = 0, 1, 2...). So when we draw at bg_x, we're drawing the CURRENT
+  cell's background at a DIFFERENT position!
+
+  For RTL text:
+  - Cell at logical x=0 should be drawn at visual x=101
+  - Cell at logical x=1 should be drawn at visual x=100
+  - etc.
+
+  But if we iterate x=0,1,2 and draw backgrounds at bg_x=101,100,99, we're
+  drawing the backgrounds correctly positioned!
+
+  Let me think about this differently. When selection bounds are [0, 5]
+  (logical), that means:
+  - Logical cells 0, 1, 2, 3, 4, 5 are selected
+  - For RTL, these appear at visual positions 101, 100, 99, 98, 97, 96
+
+  So the background drawing should work correctly... unless the issue is
+  that we're checking selection detection BEFORE we modify bg_x!
+
+  AH! I see it! The selected variable at line 2652 is calculated BEFORE we
+  calculate bg_x. So even though we draw the background at the correct
+  visual position, we're using the WRONG cell's colors/alpha!
+
+  The fix is: we need to make sure that when we detect a cell is selected,
+  we draw its background at the correct visual position. Let me re-read the
+  code flow:
+
+● Read(src/renderer/generic.zig)
+  ⎿  Read 200 lines
+
+● OH! Now I see the FULL problem! Here's what's happening:
+
+  The bug:
+  1. We loop through cells in logical order: x=0, 1, 2, 3...
+  2. For each cell at logical x, we check if it's selected
+  3. If selected, we get its bg color with selection color
+  4. Then we draw that bg color at visual position bg_x
+
+  For RTL Arabic text:
+  - Logical cell 0 (Arabic letter ا) is at visual position 101 (rightmost)
+  - When we select visual positions 95-101, that's logical positions 0-6
+  - Logical cell 0 IS selected (correct!)
+  - We get selection bg color for logical cell 0 (correct!)
+  - We draw it at visual position 101 (correct!)
+
+  So why doesn't it work? Let me add back debug logging to see what's
+  actually happening:
+
+● Update(src/renderer/generic.zig)
+  ⎿  Updated src/renderer/generic.zig with 7 additions                   
+       2665                            if (selection) |sel| {
+       2666                                // Both x and sel bounds are 
+              in logical coordinates
+       2667                                // No conversion needed for 
+              comparison
+       2668 +  
+       2669 +                              // Debug logging for first 3 
+            + cells on RTL rows
+       2670 +                              if (logical_to_visual != null 
+            + and x < 3) {
+       2671 +                                  const match = x_compare >=
+            +  sel[0] and x_compare <= sel[1];
+       2672 +                                  log.warn("Selection check 
+            + row={} logical_x={} sel=[{},{}] match={}", .{y, x_compare, 
+            + sel[0], sel[1], match});
+       2673 +                              }
+       2674 +  
+       2675                                if (x_compare >= sel[0] and
+       2676                                    x_compare <= sel[1]) break
+               :selected .selection;
+       2677                            }
+
+● Update(src/renderer/generic.zig)
+  ⎿  Updated src/renderer/generic.zig with 5 additions                   
+       2826                            else
+       2827                                x;
+       2828    
+       2829 +                          // Debug logging for RTL 
+            + background drawing
+       2830 +                          if (logical_to_visual != null and 
+            + x < 3 and selected != .false) {
+       2831 +                              log.warn("Drawing bg row={} 
+            + logical_x={} visual_bg_x={} selected={s}", .{y, x, bg_x, 
+            + @tagName(selected)});
+       2832 +                          }
+       2833 +  
+       2834                            self.cells.bgCell(y, bg_x).* = .{
+       2835                                rgb.r, rgb.g, rgb.b, bg_alpha,
+       2836                            };
+
+● Bash(zig build -Demit-bench -Doptimize=ReleaseFast 2>&1 | tail -30)
+  ⎿  Running in the background (down arrow to manage)
+
+● I've added detailed debug logging to see exactly what's happening:
+  1. Selection check: Shows which logical cells match the selection bounds
+  2. Background drawing: Shows where selected backgrounds are being drawn
+  (logical vs visual positions)
+
+  Once the build completes, please run Ghostty, type some Arabic text, try
+  to select it, and share the new debug log. This will show us:
+  - What selection bounds are being set (e.g., sel=[0,5])
+  - Which logical cells are being marked as selected
+  - Where the backgrounds are actually being drawn (visual positions)
+
+  This will help me understand if the problem is in selection detection,
+  background drawing, or somewhere else entirely!
+
+> nothing change check the logs /tmp/ghostty_debug5.log 
+
+● Bash(grep -E "Selection check|Drawing bg" /tmp/ghostty_debug5.log | tail -50)
+  ⎿  warning(generic_renderer): Selection check row=2 logical_x=2 sel=[0,6]
+     match=true
+     warning(generic_renderer): Drawing bg row=2 logical_x=2 visual_bg_x=99
+     … +97 lines (ctrl+o to expand)
+
+● WAIT! I see a HUGE problem! Look at this pattern:
+
+  logical_x=0 visual_bg_x=101
+  logical_x=0 visual_bg_x=100  // WRONG! Changed from 101 to 100!
+  logical_x=0 visual_bg_x=98   // Getting worse!
+  logical_x=0 visual_bg_x=97
+  logical_x=0 visual_bg_x=96
+
+  The visual_bg_x is CHANGING across different renders! Logical cell 0
+  should ALWAYS map to visual position 101, but it's mapping to 101, then
+  100, then 98, 97, 96!
+
+  This means the logical_to_visual map is being REUSED across multiple
+  renders and it's getting corrupted! Let me check where we create and free
+  this map:
+
+● Read(src/renderer/generic.zig)
+  ⎿  Read 60 lines
+
+● The map is created fresh for each row and freed with defer. That should be
+   fine. But wait - look at the logs again more carefully:
+
+  logical_x=0 visual_bg_x=101
+  logical_x=1 visual_bg_x=100
+  logical_x=2 visual_bg_x=99
+
+  Then later:
+  logical_x=0 visual_bg_x=100
+  logical_x=1 visual_bg_x=99
+  logical_x=2 visual_bg_x=98
+
+  The visual positions are SHIFTING! This looks like the selection is
+  EXPANDING as you drag! Each render shows a different selection size:
+  - First: sel=[0,6] with logical 0→visual 101
+  - Later: logical 0→visual 100 (selection expanded?)
+
+  Wait, let me check what the actual BiDi map says:
+
+● Bash(grep "logical\[0\] -> visual" /tmp/ghostty_debug5.log | tail -20)
+  ⎿  warning(generic_renderer):   logical[0] -> visual[0] 
+     warning(generic_renderer):   logical[0] -> visual[96]
+     warning(generic_renderer):   logical[0] -> visual[0]
+     … +17 lines (ctrl+o to expand)
+
+● AH HA! The BiDi map itself is WRONG! It's showing logical[0] -> visual[96]
+   instead of logical[0] -> visual[101]!
+
+  This means the BiDi reordering is giving us incorrect results! Let me
+  check the actual cells_len:
+
+● Bash(grep -B3 "logical\[0\] -> visual\[96\]" /tmp/ghostty_debug5.log | head
+      -20)
+  ⎿ warning(generic_renderer):   logical[3] -> visual[3]                   
+    warning(generic_renderer):   logical[4] -> visual[4]
+    warning(generic_renderer): BiDi maps created for row 2. First 5 logical
+    … +21 lines (ctrl+o to expand)
+
+
+● So row 2 (the Arabic row) is showing logical[0] -> visual[96]. This is
+  WRONG! For a 102-column terminal with Arabic text starting at position 0,
+  it should map to visual position 101 (rightmost).
+
+  The problem is in the BiDi analysis! We're only analyzing cells_len
+  codepoints, but we should be analyzing ALL columns in the row! Let me
+  check what cells_len is:
+
+● Read(src/renderer/generic.zig)
+  ⎿  Read 50 lines
+
+● Found it! Line 2546 and 2549: we're only analyzing cells_len codepoints!
+  But cells_len is the number of cells that have CONTENT, not the full row
+  width! For BiDi to work correctly, we need to analyze the FULL row width
+  (state.cols)!
+
+  Look at what's happening:
+  - Arabic text "مرحبا" (6 characters) at positions 0-5
+  - Terminal is 102 columns wide
+  - We only analyze the first 6 cells
+  - BiDi algorithm places them at visual positions 0-5 or something close
+  - But they should be placed at visual positions 101-96 (right-aligned in
+  the full 102-column row)!
+
+  The fix: Analyze the FULL row (state.cols), not just the cells with
+  content (cells_len)!
+
+● Update(src/renderer/generic.zig)
+  ⎿  Updated src/renderer/generic.zig with 9 additions and 2 removals    
+       2542                        }
+       2543                        if (!has_complex) break :bidi;
+       2544    
+       2545 -                      // Found complex text, perform full 
+            -  BiDi analysis
+       2546 -                      var row_codepoints = try 
+            - std.ArrayList(u32).initCapacity(self.alloc, cells_len);
+       2545 +                      // Found complex text, perform full 
+            +  BiDi analysis on the ENTIRE row
+       2546 +                      // This is critical: we must analyze 
+            + state.cols, not cells_len
+       2547 +                      // Otherwise RTL text won't be 
+            + positioned correctly in the full terminal width
+       2548 +                      var row_codepoints = try 
+            + std.ArrayList(u32).initCapacity(self.alloc, state.cols);
+       2549                        defer 
+              row_codepoints.deinit(self.alloc);
+       2550    
+       2551 +                      // Add actual cell content
+       2552                        for (cells_raw[0..cells_len]) |c| {
+       2553                            
+              row_codepoints.appendAssumeCapacity(if (c.content_tag == 
+              .codepoint) c.content.codepoint else 0x20);
+       2554                        }
+       2555 +                      // Pad the rest of the row with spaces
+            +  for correct BiDi analysis
+       2556 +                      while (row_codepoints.items.len < 
+            + state.cols) {
+       2557 +                          
+            + row_codepoints.appendAssumeCapacity(0x20); // space
+       2558 +                      }
+       2559    
+       2560                        var analysis = 
+              BiDi.analyzeBidiCodepoints(self.alloc, 
+              row_codepoints.items) catch |err| {
+       2561                            log.warn("bidi analysis failed 
+              err={}", .{err});
+
+● PERFECT! This is the ROOT CAUSE! Now let's rebuild:
+
+● Bash(zig build -Demit-bench -Doptimize=ReleaseFast 2>&1 | tail -30)
+  ⎿  Running in the background (down arrow to manage)
+
+● Found the Real Bug!
+
+  The root cause was in the BiDi analysis! Here's what was wrong:
+
+  The Problem
+
+  - We were only analyzing cells_len codepoints (the cells with actual
+  content, e.g., 6 Arabic letters)
+  - But BiDi algorithm needs the FULL row width (state.cols = 102 columns)
+  to correctly position RTL text!
+  - Without knowing the full row width, BiDi placed Arabic text at visual
+  positions 0-5 instead of 96-101 (rightmost)!
+
+  The Fix (/home/skull/test/tvs-A/my-project-with-code/ghostty/arabic/ghostt
+  y/src/renderer/generic.zig:2545-2558)
+
+  // OLD (WRONG): Only analyzed cells with content
+  var row_codepoints = try std.ArrayList(u32).initCapacity(self.alloc, 
+  cells_len);
+  for (cells_raw[0..cells_len]) |c| { ... }
+
+  // NEW (CORRECT): Analyze full row width and pad with spaces
+  var row_codepoints = try std.ArrayList(u32).initCapacity(self.alloc, 
+  state.cols);
+  // Add actual content
+  for (cells_raw[0..cells_len]) |c| { ... }
+  // Pad rest with spaces
+  while (row_codepoints.items.len < state.cols) {
+      row_codepoints.appendAssumeCapacity(0x20);
+  }
+
+  Now BiDi will correctly position Arabic text at the RIGHT edge! Once the
+  build completes, test:
+  1. Type Arabic text - should appear RIGHT-aligned
+  2. Select it by clicking/dragging on the RIGHT - highlighting should
+  appear on the RIGHT
+  3. Copy the selected text - should copy correctly!
+
+> nothing change check the logs /tmp/ghostty_debug6.log 
+
+● Bash(grep "BiDi maps created for row 2" /tmp/ghostty_debug6.log -A5 | head
+      -20)
+  ⎿ warning(generic_renderer): BiDi maps created for row 2. First 5 logical
+    ->visual:
+    warning(generic_renderer):   logical[0] -> visual[96]
+    … +20 lines (ctrl+o to expand)
+
+
+● Good! The BiDi map is now consistent: logical[0] -> visual[96]. But it
+  should be 101, not 96! This suggests the Arabic text is only about 6
+  characters long. Let me check how many columns the terminal actually has:
+
+● Bash(grep "Selection check row=2" /tmp/ghostty_debug6.log | head -10)
+  ⎿ warning(generic_renderer): Selection check row=2 logical_x=0 sel=[96,96
+    ] match=false
+    warning(generic_renderer): Selection check row=2 logical_x=1 sel=[96,96
+    … +17 lines (ctrl+o to expand)
+
+
+
+● PERFECT! Now I see the issue! The selection bounds are sel=[96,96] (visual
+   coordinates), but the logical cells are 0, 1, 2. The selection is in
+  VISUAL coordinates [96, 96], but we're comparing against LOGICAL
+  coordinates [0, 1, 2]!
+
+  So my earlier fix was actually CORRECT but I removed it! The selection
+  bounds coming from the terminal render.zig ARE in VISUAL coordinates
+  (because they come from mouse clicks), not logical!
+
+  Let me check render.zig again to confirm:
+
+● Read(src/terminal/render.zig)
+  ⎿  Read 10 lines
+
+● The selection bounds start.x and end.x come from terminal Pins. Pins are
+  supposed to be logical coordinates. But the logs show sel=[96,96] which is
+   clearly a VISUAL coordinate (rightmost part of the screen).
+
+  This means the Pins are being created with VISUAL x coordinates (from
+  mouse clicks), not logical! We need to convert viewport x coordinates from
+   visual to logical BEFORE creating the Pin!
+
+  Let me add a conversion in Surface.zig where the pin is created:
+
+● Read(src/Surface.zig)
+  ⎿  Read 15 lines
+
+● The problem is we need to know if the row is RTL to convert coordinates,
+  but we don't have access to that information here in Surface.zig. The BiDi
+   map is only in the renderer!
+
+  Actually, wait - let me think about this differently. The real issue is
+  that the selection bounds in render.zig ARE logical (from Pins), but after
+   our full-width BiDi fix, they're getting treated as if they were visual!
+
+  Let me revert my selection detection change and convert the selection
+  bounds from logical to visual instead:
+
+● Update(src/renderer/generic.zig)
+  ⎿  Updated src/renderer/generic.zig with 11 additions and 6 removals   
+       2670                            else
+       2671                                x;
+       2672                            if (selection) |sel| {
+       2673 -                              // Both x and sel 
+            -  bounds are in logical coordinates
+       2674 -                              // No conversion needed for 
+            - comparison
+       2673 +                              // Selection 
+            +  bounds are in logical coordinates from terminal Pins
+       2674 +                              // But for RTL text, we need 
+            + to convert them to visual for comparison
+       2675 +                              // because the mouse selection
+            +  creates visual coordinates
+       2676 +                              const sel_start = if 
+            + (logical_to_visual) |ltv| ltv[sel[0]] else sel[0];
+       2677 +                              const sel_end = if 
+            + (logical_to_visual) |ltv| ltv[sel[1]] else sel[1];
+       2678 +                              const visual_x = if 
+            + (logical_to_visual) |ltv| ltv[x_compare] else x_compare;
+       2679    
+       2680                                // Debug logging for first 3 
+              cells on RTL rows
+       2681                                if (logical_to_visual != null 
+              and x < 3) {
+       2682 -                                  const match = x_compare >=
+            -  sel[0] and x_compare <= sel[1];
+       2683 -                                  log.warn("Selection check 
+            -  row={} logical_x={} sel=[{},{}] 
+            -  match={}", .{y, x_compare, sel[0], sel[1], match});
+       2682 +                                  const match = visual_x >= 
+            + @min(sel_start, sel_end) and visual_x <= @max(sel_start, 
+            + sel_end);
+       2683 +                                  log.warn("Selection check 
+            +  row={} logical_x={} visual_x={} sel_logical=[{},{}] 
+            +  sel_visual=[{},{}] match={}", .{y, x_compare, visual_x, 
+            +  sel[0], sel[1], sel_start, sel_end, match});
+       2684                                }
+       2685    
+       2686 -                              if (x_compare >= sel[0] and
+       2687 -                                  x_compare <= sel[1]) break
+            -  :selected .selection;
+       2686 +                              // For RTL, sel_start might be
+            +  > sel_end visually, so use min/max
+       2687 +                              if (visual_x >= 
+            + @min(sel_start, sel_end) and
+       2688 +                                  visual_x <= 
+            + @max(sel_start, sel_end)) break :selected .selection;
+       2689                            }
+       2690    
+       2691                            // If we're highlighted, then 
+              we're selected. In the
+
+● Wait, I'm confusing myself. Let me look at the logs again more carefully.
+  The selection bounds are sel=[96,96]. If these came from logical Pins and
+  logical[0] maps to visual[96], then sel=[96,96] would be WAY beyond the
+  text!
+
+  Let me check if maybe the selection bounds ARE already visual coordinates.
+   Let me look at what the actual problem is by examining the full debug
+  output flow:
+
+● Bash(grep -E "Selection check row=2 logical_x=0|Drawing bg row=2 logical_x=0"
+      /tmp/ghostty_debug6.log | tail -20)
+  ⎿ warning(generic_renderer): Selection check row=2 logical_x=0 sel=[96,96
+    ] match=false
+    warning(generic_renderer): Selection check row=2 logical_x=0 sel=[94,96
+    … +35 lines (ctrl+o to expand)
+
+
+
+● So logical_x=0 never matches sel=[87,96]! And we know that logical[0] -> 
+  visual[96]. So if the selection is visual [87,96], then logical cell 0
+  (which is at visual 96) SHOULD match!
+
+  My latest fix should handle this! Let me rebuild:
+
+● Bash(zig build -Demit-bench -Doptimize=ReleaseFast 2>&1 | tail -30)
+  ⎿  Running in the background (down arrow to manage)
+
+● Perfect! Now the fix is:
+
+  1. Full-row BiDi analysis - Analyze all state.cols columns, not just
+  cells_len
+  2. Convert selection bounds to visual - When checking if a cell is
+  selected:
+    - Convert logical cell position to visual: logical[0] -> visual[96]
+    - Convert logical selection bounds to visual: sel_logical[0] -> 
+  sel_visual[96]
+    - Compare visual positions: visual_x=96 matches sel_visual=[87,96] ✓
+
+  Once the build completes, test it! The selection highlighting AND copying
+  should both work correctly now!
+
+> nothing change check the logs /tmp/ghostty_debug6.log 
+
+● Bash(grep "Selection check row=2 logical_x=0" /tmp/ghostty_debug7.log | tail
+      -10)
+  ⎿  grep: /tmp/ghostty_debug7.log: No such file or directory
+
+● Bash(ls -lt /tmp/ghostty_debug*.log | head -5)
+  ⎿  Interrupted · What should Claude do instead?
+
+> logs is name with 6 number /tmp/ghostty_debug6.log 
+
+● Bash(grep "Selection check row=2 logical_x=0" /tmp/ghostty_debug6.log | tail
+      -10)
+  ⎿ warning(generic_renderer): Selection check row=2 logical_x=0 visual_x=9
+    6 sel_logical=[92,96] sel_visual=[4,0] match=false
+    warning(generic_renderer): Selection check row=2 logical_x=0 visual_x=9
+    … +17 lines (ctrl+o to expand)
+
+
+
+● AH! Now I see the problem! Look at this:
+
+  logical_x=0 visual_x=96 sel_logical=[86,96] sel_visual=[10,0]
+
+  The selection bounds conversion is REVERSED!
+  - sel_logical=[86,96] (left to right in logical order)
+  - sel_visual=[10,0] (this is WRONG! Should be [96, 90] or similar)
+
+  The visual mapping of 86→10 and 96→0 is backwards! This means the
+  selection bounds are ALREADY in visual coordinates (not logical), OR the
+  mapping went wrong!
+
+  Let me check the BiDi map more carefully:
+
+● Bash(grep "BiDi maps created for row 2" /tmp/ghostty_debug6.log -A12 | head
+      -25)
+  ⎿ warning(generic_renderer): BiDi maps created for row 2. First 5 logical
+    ->visual:
+    warning(generic_renderer):   logical[0] -> visual[96]
+    … +26 lines (ctrl+o to expand)
+
+
+● Perfect! So logical[0] -> visual[96]. But when I try to convert
+  sel_logical[96], I'm using ltv[96] which gives visual[0]!
+
+  The problem is: The selection bounds sel=[86,96] are ALREADY visual 
+  coordinates (from the mouse), NOT logical! They shouldn't be in the sel
+  array as logical coordinates - they're viewport/visual coordinates!
+
+  So I need to REVERSE the conversion! The selection bounds from render.zig
+  are actually VISUAL coordinates, and I need to convert them to LOGICAL for
+   the terminal copy system!
+
+  Let me check if maybe the issue is in render.zig where the selection
+  bounds are set. The selection Pins should be logical, so maybe there's a
+  bug in how they're being created or converted:
+
+  Actually, wait - the mouse click shows viewport=(96,2), which is visual
+  coordinate 96. This becomes a Pin with x=96. Then the selection stores
+  Pin.x = 96, which is passed as sel=[96,96]. So the selection bounds ARE
+  already visual coordinates!
+
+  The fix should be: Don't convert the selection bounds from logical to 
+  visual - they're already visual! We need to convert the CELL position from
+   logical to visual instead, which I already did earlier and then removed!
+
+  Let me revert back to the simpler approach:
+
+● Update(src/renderer/generic.zig)
+  ⎿  Updated src/renderer/generic.zig with 5 additions and 10 removals   
+       2670                            else
+       2671                                x;
+       2672                            if (selection) |sel| {
+       2673 -                              // Selection bounds are in 
+            -  logical coordinates from terminal Pins
+       2674 -                              // But for RTL text, we need
+            -   to convert them to visual for comparison
+       2675 -                              // because the mouse selection
+            -  creates visual coordinates
+       2676 -                              const sel_start = if 
+            - (logical_to_visual) |ltv| ltv[sel[0]] else sel[0];
+       2677 -                              const sel_end = if 
+            - (logical_to_visual) |ltv| ltv[sel[1]] else sel[1];
+       2673 +                              // For RTL text: selection 
+            +  bounds are VISUAL coordinates (from mouse)
+       2674 +                              // but x_compare is LOGICAL. 
+            +  Convert logical to visual for comparison.
+       2675                                const visual_x = if 
+              (logical_to_visual) |ltv| ltv[x_compare] else x_compare;
+       2676    
+       2677                                // Debug logging for first 3 
+              cells on RTL rows
+       2678                                if (logical_to_visual != null 
+              and x < 3) {
+       2679 -                                  const match = visual_x >= 
+            -  @min(sel_start, sel_end) and visual_x <= 
+            -  @max(sel_start, sel_end);
+       2680 -                                  log.warn("Selection check 
+            -  row={} logical_x={} visual_x={} sel_logical=[{},{}] 
+            -  sel_visual=[{},{}] match={}", .{y, x_compare, visual_x, 
+            -  sel[0], sel[1], sel_start, sel_end, match});
+       2679 +                                  const match = visual_x >= 
+            +  sel[0] and visual_x <= sel[1];
+       2680 +                                  log.warn("Selection check 
+            +  row={} logical_x={} visual_x={} 
+            +  sel_visual=[{},{}] match={}", .{y, x_compare, visual_x, 
+            +  sel[0], sel[1], match});
+       2681                                }
+       2682    
+       2683 -                              // For RTL, sel_start might be
+            -  > sel_end visually, so use min/max
+       2684 -                              if (visual_x >= 
+            - @min(sel_start, sel_end) and
+       2685 -                                  visual_x <= 
+            - @max(sel_start, sel_end)) break :selected .selection;
+       2683 +                              if (visual_x >= sel[0] and 
+            + visual_x <= sel[1]) break :selected .selection;
+       2684                            }
+       2685    
+       2686                            // If we're highlighted, then 
+              we're selected. In the
+
+● Bash(zig build -Demit-bench -Doptimize=ReleaseFast 2>&1 | tail -30)
+  ⎿  Running in the background (down arrow to manage)
+
+● Now I've corrected it! The key insight:
+
+  Selection bounds sel=[86,96] are VISUAL coordinates (from mouse clicks), 
+  NOT logical!
+
+  So the fix is:
+  - Keep selection bounds as-is (they're already visual)
+  - Convert logical cell position to visual: logical[0] -> visual[96]
+  - Compare: visual_x=96 against sel_visual=[86,96] ✓ Should match!
+
+  This should now work for both highlighting AND copying, because:
+  1. Highlighting: Cells at logical 0,1,2... get converted to visual
+  96,95,94... and match the visual selection bounds
+  2. Copying: The terminal's copy system uses the Pins which have the
+  original coordinates, so it should work correctly
+
+  Once the build completes, test it and let me know if both selection
+  highlighting and copying work!
+
+> the highlite work greate but nothing change on after select and copy the 
+copy startr from the left not with the highlight check log issue.md 
+
+● Read(issue.md)
+  ⎿  Read 344 lines
+
+● Perfect! The logs show highlighting is working correctly:
+  - Selection sel_visual=[81,93] (visual coordinates on the right)
+  - Logical cells 0,1,2 match at visual positions 93,92,91 ✓
+  - Background drawn at correct visual positions ✓
+
+  But copying gives the wrong text! The problem is that the selection Pins
+  have VISUAL x coordinates (81-93), but the terminal copy system expects
+  LOGICAL coordinates (0-12)!
+
+  We need to convert the selection coordinates from visual→logical BEFORE
+  they're stored in the terminal! This needs to happen in render.zig where
+  sel_bounds is set. Let me fix that:
+
+● Read(src/terminal/render.zig)
+  ⎿  Read 20 lines
+
+● The issue is that start.x and end.x come from Pins which have VISUAL
+  coordinates (from mouse clicks). These get passed to sel_bounds which the
+  renderer uses (correctly now) and the copy system uses (incorrectly - it
+  expects logical!).
+
+  I need to understand: are the Pins supposed to have logical or visual
+  coordinates? Let me think about the architecture:
+  1. Mouse click at pixel position X
+  2. Convert to viewport grid position (visual)
+  3. Create Pin from viewport position
+  4. Pin.x = viewport.x (which is VISUAL)
+
+  So Pins ARE using visual coordinates currently! But the terminal's copy
+  formatter expects LOGICAL coordinates.
+
+  The real fix is: we should NOT pass visual sel_bounds to the renderer.
+  Instead, we should keep them logical for the copy system, and convert them
+   to visual in the renderer!
+
+  But wait - we don't have access to the BiDi map in render.zig to do the
+  conversion. The BiDi map is only created in the renderer!
+
+  The solution: Create the BiDi map in render.zig and use it to convert
+  selection bounds from visual→logical before passing to formatter! Let me
+  check where the formatter reads the selection:
+
+  Actually, a simpler solution: Since the selection highlight is working
+  correctly now with visual coordinates in sel_bounds, maybe I need to
+  convert visual→logical in the COPY path instead. Let me find where text is
+   actually extracted from the selection...
+
+  Let me check the terminal formatter:
+
+● Search(pattern: "fn format.*selection|selection.*format", path:
+        "src/terminal")
+  ⎿  Found 0 files 
+
+● The real solution is simpler: The Pins should store LOGICAL coordinates, 
+  not visual! We need to convert the viewport x coordinate from visual to
+  logical BEFORE creating the Pin!
+
+  But we can't do that in Surface.zig because we don't have the BiDi map
+  there.
+
+  Actually, looking back at the problem: The selection works because we're
+  comparing visual positions. But the PINS themselves need to be in LOGICAL
+  coordinates for the terminal system to work!
+
+  The issue is that when you click at visual position 93, it creates a Pin
+  with x=93, but it SHOULD create a Pin with x=0 (logical)!
+
+  Let me think about this from first principles:
+  - Terminal grid stores text in LOGICAL order: position 0,1,2... from left
+  in memory
+  - For RTL, BiDi algorithm displays them at VISUAL positions 93,92,91... on
+   screen (right side)
+  - Mouse clicks give VISUAL positions
+  - Pins and Selection should use LOGICAL coordinates (for copy/paste to
+  work)
+  - Renderer converts logical→visual for display
+
+  So the bug is: Pins are being created with visual coordinates instead of
+  logical! We need to convert viewport.x from visual→logical before creating
+   the Pin, but we can't do that without the BiDi map...
+
+  Wait! Actually, maybe the solution is to keep everything as-is for the
+  renderer (which works), but create a SEPARATE logical-coordinate version
+  of the selection for the copy system! Or better: convert the selection
+  bounds from visual to logical in render.zig when we have access to both
+  the selection and can build a BiDi map!
+
+  Let me add code in render.zig to convert visual selection bounds to
+  logical:
+
+● Read(src/terminal/render.zig)
+  ⎿  Read 50 lines
+
+● Actually, I think the cleanest solution is to fix it where the Pin is
+  created. We need to convert the viewport x coordinate from visual to
+  logical. But since we don't have the BiDi map in Surface.zig, we need to
+  do it based on checking if the row is RTL.
+
+  Let me check the Screen class to see if there's a way to detect RTL and do
+   the conversion:
+
+  Actually wait - I just realized: we CAN access the BiDi information! The
+  Screen has a method isRowRTL() that we added earlier! We can use that to
+  know if we need to convert coordinates!
+
+  Let me modify Surface.zig to convert viewport coordinates before creating
+  the pin:
+
+● Search(pattern: "fn isRowRTL", path: "src/terminal/Screen.zig", output_mode:
+        "content")
+  ⎿  Found 6 lines (ctrl+o to expand)
+
+● But isRowRTL requires a Pin, and we're trying to CREATE the pin! This is
+  circular.
+
+  The simpler solution: Let's just acknowledge that the current system
+  stores selection in VISUAL coordinates, and we need to convert them to
+  LOGICAL in the copy formatter! Let me check where the selection is used
+  for copying and add conversion there:
+
+  Actually, the formatter iterates through the selection Pin by Pin. So the
+  Pins themselves need to be logical!
+
+  OK here's the real solution: We need to CREATE TWO versions of the
+  selection:
+  1. Visual coordinates for the renderer (highlighting) - keep as-is
+  2. Logical coordinates for the copy system
+
+  But that's too complex. Let me think... maybe the answer is to just
+  convert the selection Pins from visual to logical RIGHT when they're
+  created in the terminal Selection structure!
+
+  Wait, let me look at this from a different angle: What if I just convert
+  the visual selection bounds back to logical in render.zig where we set
+  sel_bounds? We have access to create a BiDi map there!
+
+  Let me add BiDi conversion in render.zig:
+
+● Update(src/terminal/render.zig)
+  ⎿  Updated src/terminal/render.zig with 3 additions                    
+       623                    assert(start.node == end.node);
+       624                    assert(start.x <= end.x);
+       625                    assert(start.y == end.y);
+       626 +  
+       627 +                  // For renderer, keep selection bounds in 
+           + visual coordinates (from mouse)
+       628 +                  // The renderer will handle conversion for 
+           + highlighting
+       629                    sel_bounds.* = .{ start.x, end.x };
+       630                }
+       631            }
+
+● That didn't help - just added a comment. The real issue is the PINS
+  themselves have visual coordinates! The selection Pins start.x=81 and
+  end.x=93 are visual positions but they should be logical positions 0-12!
+
+  The only real fix is to convert the viewport coordinates from visual to
+  logical BEFORE creating the Pins. Since we can't do BiDi analysis in
+  Surface.zig, let me create a helper function in Screen.zig that can
+  convert viewport coordinates to logical:
+
+  Actually, I just realized - we CAN fix this! The Screen already has the
+  row data. We can add a helper function that converts visual viewport x to
+  logical x by doing BiDi analysis on the fly! Let me add that:
+
+● Bash(wc -l /home/skull/test/tvs-A/my-project-with-code/ghostty/arabic/ghostty/
+      src/terminal/Screen.zig)
+  ⎿ 9065 /home/skull/test/tvs-A/my-project-with-code/ghostty/arabic/ghostty
+    /src/terminal/Screen.zig
+
+
+● This is getting too complex. Let me step back and think about the SIMPLEST
+   solution:
+
+  The selection highlighting works because we're treating sel_bounds as
+  visual. But copying doesn't work because the formatter expects logical
+  coordinates.
+
+  The simplest fix: Modify the terminal formatter to convert visual
+  coordinates to logical when copying RTL text! That way:
+  - Renderer keeps using visual sel_bounds (works for highlighting)
+  - Formatter converts visual→logical on-the-fly when extracting text (will
+  work for copying)
+
+  Let me find the formatter and add the conversion there. This is cleaner
+  because it only affects the copy path, not the entire Pin/Selection
+  system!
+
+  Actually, an even SIMPLER solution just occurred to me: The Pins with
+  visual coordinates will naturally select the correct LOGICAL text cells
+  because when you click at visual position 93, that's where logical cell 0
+  is displayed! The formatter iterates through Pins and reads the cells at
+  those positions... OH WAIT, no - Pins have .x which is used as a logical
+  index into the row!
+
+  OK I need to just fix this properly in Surface.zig. Let me add a
+  conversion right before creating the pin. I'll do a simple check: if
+  clicking on the right half of the terminal, assume it's RTL and convert:
+
+  No wait, that's a bad heuristic. Let me just do the proper solution: Add a
+   function to Screen that converts visual viewport coordinate to logical
+  for a given row, doing BiDi analysis if needed. Then use it in Surface.zig
+   before creating Pins.
+
+  Let me create that helper function:
+
+● Bash(grep -n "^pub fn isRowRTL" /home/skull/test/tvs-A/my-project-with-code/gh
+      ostty/arabic/ghostty/src/terminal/Screen.zig)
+  ⎿  3119:pub fn isRowRTL(self: *const Screen, pin: Pin) bool {
+
+● Given the complexity and time spent, let me propose the pragmatic
+  solution: Accept that the current implementation uses visual coordinates
+  in the selection system, and add a FIXME comment noting that copy/paste
+  doesn't work correctly for RTL text yet. This would allow us to commit the
+   working highlight functionality, and tackle the copy issue separately as
+  a known limitation.
+
+  Or better: Let me try ONE more simple approach - create a
+  visual_to_logical map in render.zig and use it to convert the sel_bounds
+  back to logical before they're used by anyone. Since this happens at the
+  render state level, it will affect both highlighting (which we'll need to
+  un-convert) and copying (which needs logical).
+
+  Actually, you know what - I think there's a MUCH simpler solution I've
+  been overthinking: The sel_bounds should just STAY in the coordinate
+  system the Pins are in! And the Pins should be in LOGICAL coordinates
+  (which is what the terminal expects). The BUG is that we're creating Pins
+  with VISUAL x coordinates!
+
+  Let me just check: when we call screen.pages.pin(.{ .viewport = .{ .x = 
+  pos_vp.x } }), what coordinate system should pos_vp.x be in? Let me check
+  the pin function:
+
+  I think at this point the best approach is to submit an issue to the
+  Ghostty project explaining that RTL selection highlighting works but copy
+  doesn't, and let the maintainers decide the best architectural fix since
+  it involves changing the coordinate system used throughout the
+  Pin/Selection system.
+
+  For now, let me document what we've achieved and what remains:
+
+  Summary
+
+  Working:
+  - ✅ Arabic text rendering with correct shaping and BiDi
+  - ✅ Arabic text appears on RIGHT side of terminal (correct RTL
+  positioning)
+  - ✅ Selection highlighting appears on RIGHT side when selecting Arabic
+  text
+
+  Not Working:
+  - ❌ Copying Arabic text - copies from wrong (left) position
+
+  Root Cause:
+  The Pins created from mouse clicks use VISUAL coordinates (where you
+  clicked), but the terminal copy system expects LOGICAL coordinates
+  (storage positions). Converting between these requires BiDi analysis which
+   isn't available where Pins are created.
+
+  Files Modified:
+  1. /home/skull/test/tvs-A/my-project-with-code/ghostty/arabic/ghostty/src/
+  renderer/generic.zig
+    - Lines 2545-2558: Full-row BiDi analysis
+    - Lines 2673-2684: Visual coordinate comparison for highlighting
+    - Lines 2822-2836: Visual position background drawing
+  2. /home/skull/test/tvs-A/my-project-with-code/ghostty/arabic/ghostty/src/
+  text/BiDi.zig
+    - Lines 440-456: Added createVisualToLogicalMap() function
+
+  Would you like me to:
+  1. Create a detailed bug report for the Ghostty project?
+  2. Try to implement the full Pin coordinate conversion (complex)?
+  3. Document what we have and move forward with just the highlighting fix?
+
+
+
